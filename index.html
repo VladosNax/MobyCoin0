@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>MobyCoin</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+  <div class="app">
+    <header class="top">
+      <div class="brand">
+        <div class="logo">🪙</div>
+        <div>
+          <div class="title">MobyCoin</div>
+          <div class="subtitle" id="userLine">Загрузка…</div>
+        </div>
+      </div>
+      <div class="pill" id="networkPill">WebApp</div>
+    </header>
+
+    <!-- Энергия -->
+    <section class="energy">
+      <div class="energy-top">
+        <div class="energy-title">Энергия</div>
+        <div class="energy-value"><span id="energyNow">0</span>/<span id="energyMax">0</span></div>
+      </div>
+      <div class="energy-bar">
+        <div class="energy-fill" id="energyFill"></div>
+      </div>
+      <div class="energy-hint" id="energyHint">Восстановление…</div>
+      <div class="boost-status" id="boostStatus"></div>
+    </section>
+
+    <!-- Статы -->
+    <section class="stats">
+      <div class="card">
+        <div class="label">Баланс</div>
+        <div class="value" id="balance">0</div>
+        <div class="hint">MobyCoin</div>
+      </div>
+      <div class="card">
+        <div class="label">За тап</div>
+        <div class="value" id="perTap">1</div>
+        <div class="hint">с бонусами</div>
+      </div>
+      <div class="card">
+        <div class="label">В сек</div>
+        <div class="value" id="perSec">0</div>
+        <div class="hint">пассивно</div>
+      </div>
+    </section>
+
+    <!-- Вкладки -->
+    <nav class="tabs">
+      <button class="tab active" data-tab="tap">Тап</button>
+      <button class="tab" data-tab="shop">Магазин</button>
+      <button class="tab" data-tab="quests">Квесты</button>
+    </nav>
+
+    <main class="main">
+      <!-- TAP -->
+      <section class="panel show" id="tab-tap">
+        <div class="tap-area">
+          <button class="tap-btn" id="tapBtn" aria-label="Tap">
+            <div class="tap-inner">
+              <div class="tap-coin" id="tapCoin">
+                <div class="coin-face" id="coinFace">☠️</div>
+              </div>
+              <div class="tap-text">ТАП!</div>
+              <div class="tap-sub" id="comboLine">Комбо: x1</div>
+            </div>
+
+            <!-- бусты по углам -->
+            <div class="boost-layer" id="boostLayer"></div>
+          </button>
+
+          <!-- плавающие монеты/тексты -->
+          <div class="floating" id="floating"></div>
+        </div>
+
+        <div class="mini-row">
+          <div class="mini-card">
+            <div class="mini-label">Крит шанс</div>
+            <div class="mini-value" id="critChance">0%</div>
+          </div>
+          <div class="mini-card">
+            <div class="mini-label">Крит множ.</div>
+            <div class="mini-value" id="critMult">x2.0</div>
+          </div>
+          <div class="mini-card">
+            <div class="mini-label">Авто</div>
+            <div class="mini-value" id="autoRate">0/с</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SHOP -->
+      <section class="panel" id="tab-shop">
+        <section class="shop">
+          <div class="section-title">
+            <span>Апгрейды</span>
+            <button class="ghost" id="resetBtn">Сброс</button>
+          </div>
+          <div class="shop-list" id="shopList"></div>
+
+          <div class="section-title" style="margin-top:14px">
+            <span>Скины кнопки</span>
+          </div>
+          <div class="shop-list" id="skinList"></div>
+        </section>
+      </section>
+
+      <!-- QUESTS -->
+      <section class="panel" id="tab-quests">
+        <section class="shop">
+          <div class="section-title">
+            <span>Квесты</span>
+            <button class="ghost" id="claimAllBtn">Забрать всё</button>
+          </div>
+          <div class="shop-list" id="questList"></div>
+        </section>
+      </section>
+    </main>
+
+    <footer class="bottom">
+      <button class="primary" id="shareBtn">Поделиться</button>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
