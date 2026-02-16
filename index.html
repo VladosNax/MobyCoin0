@@ -20,6 +20,9 @@
       <div class="pill" id="networkPill">WebApp</div>
     </header>
 
+    <!-- FX слой для дождя монет/батареек -->
+    <div class="fx-layer" id="fxLayer"></div>
+
     <!-- Энергия -->
     <section class="energy">
       <div class="energy-top">
@@ -34,17 +37,25 @@
     </section>
 
     <!-- Статы -->
-    <section class="stats">
+    <section class="stats stats-4">
+      <div class="card">
+        <div class="label">Очки</div>
+        <div class="value" id="score">0</div>
+        <div class="hint">всего заработано</div>
+      </div>
+
       <div class="card">
         <div class="label">Баланс</div>
         <div class="value" id="balance">0</div>
-        <div class="hint">MobyCoin</div>
+        <div class="hint">тратится на покупки</div>
       </div>
+
       <div class="card">
         <div class="label">За тап</div>
         <div class="value" id="perTap">1</div>
         <div class="hint">с бонусами</div>
       </div>
+
       <div class="card">
         <div class="label">В сек</div>
         <div class="value" id="perSec">0</div>
@@ -72,7 +83,7 @@
               <div class="tap-sub" id="comboLine">Комбо: x1</div>
             </div>
 
-            <!-- бусты по углам -->
+            <!-- буст появляется и дрейфует -->
             <div class="boost-layer" id="boostLayer"></div>
           </button>
 

@@ -4,6 +4,7 @@ const el = {
   userLine: document.getElementById("userLine"),
   networkPill: document.getElementById("networkPill"),
 
+  score: document.getElementById("score"),
   balance: document.getElementById("balance"),
   perTap: document.getElementById("perTap"),
   perSec: document.getElementById("perSec"),
@@ -13,6 +14,8 @@ const el = {
   energyFill: document.getElementById("energyFill"),
   energyHint: document.getElementById("energyHint"),
   boostStatus: document.getElementById("boostStatus"),
+
+  fxLayer: document.getElementById("fxLayer"),
 
   tapBtn: document.getElementById("tapBtn"),
   floating: document.getElementById("floating"),
@@ -31,7 +34,7 @@ const el = {
   claimAllBtn: document.getElementById("claimAllBtn"),
 };
 
-const STORAGE_KEY = "mobycoin_state_v3";
+const STORAGE_KEY = "mobycoin_state_v4";
 const now = () => Date.now();
 
 const format = (n) => {
@@ -76,30 +79,34 @@ const SKINS = [
 ];
 
 /* -------------------- Boosts -------------------- */
+/* Появляются реже + иконки: ∞ и 🚀 */
 const BOOSTS = [
-  { type: "infinite", title: "∞ Стамина", icon: "⚡", durationSec: 8 },
-  { type: "double",   title: "x2 Прибыль", icon: "🪙", durationSec: 10 },
+  { type: "infinite", title: "∞ Стамина", icon: "∞", durationSec: 10 },
+  { type: "double",   title: "x2 Прибыль", icon: "🚀", durationSec: 12 },
 ];
 
 function defaultState() {
   return {
+    // Очки (всё заработанное) — не уменьшается
+    score: 0,
+
+    // Баланс — тратится на покупки
     balance: 0,
 
-    // базовые параметры
     basePerTap: 1,
     perSec: 0,
 
-    // энергия (замедленная)
-    energyMax: 120,
-    energy: 120,
-    energyRegenPerSec: 0.6,
-    energyCostPerTap: 2,
+    // энергия
+    energyMax: 140,
+    energy: 140,
+    energyRegenPerSec: 0.55,  // медленнее
+    energyCostPerTap: 2.2,    // чуть дороже
 
     // крит/комбо/авто
-    critChance: 0.04,       // 4%
-    critMult: 2.0,          // x2
+    critChance: 0.04,
+    critMult: 2.0,
     combo: 0,
-    comboMultPerStep: 0.02, // +2% за шаг
+    comboMultPerStep: 0.02,
     comboCap: 50,
     comboTimeoutMs: 1500,
     lastTapAt: 0,
@@ -130,7 +137,7 @@ function defaultState() {
     boosts: {
       active: { double: 0, infinite: 0 },
       nextSpawnAt: 0,
-      shown: null, // { type, expiresAt, corner }
+      shown: null, // { type, expiresAt, x, y }
     },
 
     quests: {
@@ -144,10 +151,9 @@ function defaultState() {
       buy_autoclick: { claimed: false },
 
       reach_persec: { claimed: false, target: 50 },
-      buy_skin: { claimed: false }, // купи любой платный скин
+      buy_skin: { claimed: false },
 
-      // заглушки без сервера (оставим как визуал)
-      subscribe: { claimed: false },
+      subscribe: { claimed: false }, // заглушки
       invite: { claimed: false, invited: 0, target: 3 },
     },
 
@@ -188,10 +194,7 @@ function saveState(){
 /* -------------------- Telegram init -------------------- */
 function initTelegram(){
   if(!tg) return;
-  try{
-    tg.ready();
-    tg.expand();
-  }catch{}
+  try{ tg.ready(); tg.expand(); }catch{}
 }
 
 function renderTelegramHeader(){
@@ -208,10 +211,18 @@ function renderTelegramHeader(){
   }
 }
 
+/* -------------------- Helpers: earnings -------------------- */
+/* Любой заработок: +balance и +score */
+function addEarnings(amount){
+  if(!amount || amount <= 0) return;
+  state.balance += amount;
+  state.score += amount;
+}
+
 /* -------------------- Economy helpers -------------------- */
 function calcComboMult(){
   const comboLvl = state.upgrades.combo || 0;
-  const comboBoost = state.comboMultPerStep + comboLvl * 0.005; // +0.5%/lvl
+  const comboBoost = state.comboMultPerStep + comboLvl * 0.005;
   return 1 + clamp(state.combo, 0, state.comboCap) * comboBoost;
 }
 
@@ -235,137 +246,69 @@ function applyOfflineProgress(){
   const dtMs = Math.max(0, t - (state.lastTick || t));
   const dt = dtMs / 1000;
 
-  // пассивный доход оффлайн
-  if(state.perSec > 0) state.balance += state.perSec * dt;
+  // пассивный доход оффлайн -> и в balance и в score
+  if(state.perSec > 0) addEarnings(state.perSec * dt);
 
   // реген энергии оффлайн
   if(state.energyRegenPerSec > 0){
     state.energy = clamp(state.energy + state.energyRegenPerSec * dt, 0, state.energyMax);
   }
 
-  // протухшие бусты
   cleanupBoosts();
-
   state.lastTick = t;
 }
 
-/* -------------------- Upgrades (cookie-ish) -------------------- */
+/* -------------------- Upgrades -------------------- */
 const upgrades = [
-  // cookie buildings
-  {
-    key: "cursor",
-    name: "Cursor",
-    icon: "🖱️",
-    desc: "+1 к тапу",
-    baseCost: 15, costMul: 1.15,
-    onBuy: () => {},
-    valueText: () => `ур. ${state.upgrades.cursor} • +${state.upgrades.cursor}/тап`,
+  { key:"cursor", name:"Cursor", icon:"🖱️", desc:"+1 к тапу",
+    baseCost:15, costMul:1.15, onBuy:()=>{},
+    valueText:()=>`ур. ${state.upgrades.cursor} • +${state.upgrades.cursor}/тап`
   },
-  {
-    key: "grandma",
-    name: "Grandma",
-    icon: "👵",
-    desc: "+1/сек",
-    baseCost: 100, costMul: 1.15,
-    onBuy: () => { state.perSec += 1; },
-    valueText: () => `ур. ${state.upgrades.grandma} • +${state.upgrades.grandma}/сек`,
+  { key:"grandma", name:"Grandma", icon:"👵", desc:"+1/сек",
+    baseCost:100, costMul:1.15, onBuy:()=>{ state.perSec += 1; },
+    valueText:()=>`ур. ${state.upgrades.grandma} • +${state.upgrades.grandma}/сек`
   },
-  {
-    key: "farm",
-    name: "Farm",
-    icon: "🌾",
-    desc: "+8/сек",
-    baseCost: 1100, costMul: 1.15,
-    onBuy: () => { state.perSec += 8; },
-    valueText: () => `ур. ${state.upgrades.farm} • +${state.upgrades.farm*8}/сек`,
+  { key:"farm", name:"Farm", icon:"🌾", desc:"+8/сек",
+    baseCost:1100, costMul:1.15, onBuy:()=>{ state.perSec += 8; },
+    valueText:()=>`ур. ${state.upgrades.farm} • +${state.upgrades.farm*8}/сек`
   },
-  {
-    key: "factory",
-    name: "Factory",
-    icon: "🏭",
-    desc: "+47/сек",
-    baseCost: 13000, costMul: 1.15,
-    onBuy: () => { state.perSec += 47; },
-    valueText: () => `ур. ${state.upgrades.factory} • +${state.upgrades.factory*47}/сек`,
+  { key:"factory", name:"Factory", icon:"🏭", desc:"+47/сек",
+    baseCost:13000, costMul:1.15, onBuy:()=>{ state.perSec += 47; },
+    valueText:()=>`ур. ${state.upgrades.factory} • +${state.upgrades.factory*47}/сек`
   },
-  {
-    key: "lab",
-    name: "Lab",
-    icon: "🧪",
-    desc: "+260/сек",
-    baseCost: 200000, costMul: 1.15,
-    onBuy: () => { state.perSec += 260; },
-    valueText: () => `ур. ${state.upgrades.lab} • +${state.upgrades.lab*260}/сек`,
+  { key:"lab", name:"Lab", icon:"🧪", desc:"+260/сек",
+    baseCost:200000, costMul:1.15, onBuy:()=>{ state.perSec += 260; },
+    valueText:()=>`ур. ${state.upgrades.lab} • +${state.upgrades.lab*260}/сек`
   },
 
-  // stamina
-  {
-    key: "battery",
-    name: "Battery Pack",
-    icon: "🔋",
-    desc: "+25 макс энергии",
-    baseCost: 250, costMul: 1.25,
-    onBuy: () => {
-      state.energyMax += 25;
-      state.energy = clamp(state.energy + 10, 0, state.energyMax);
-    },
-    valueText: () => `ур. ${state.upgrades.battery} • max ${Math.floor(state.energyMax)}`,
+  { key:"battery", name:"Battery Pack", icon:"🔋", desc:"+25 макс энергии",
+    baseCost:260, costMul:1.25, onBuy:()=>{ state.energyMax += 25; state.energy = clamp(state.energy + 10, 0, state.energyMax); },
+    valueText:()=>`ур. ${state.upgrades.battery} • max ${Math.floor(state.energyMax)}`
   },
-  {
-    key: "regen",
-    name: "Recharge",
-    icon: "⚡",
-    desc: "+0.2 энергии/сек",
-    baseCost: 400, costMul: 1.22,
-    onBuy: () => { state.energyRegenPerSec += 0.2; },
-    valueText: () => `ур. ${state.upgrades.regen} • ${state.energyRegenPerSec.toFixed(1)}/сек`,
+  { key:"regen", name:"Recharge", icon:"⚡", desc:"+0.15 энергии/сек",
+    baseCost:450, costMul:1.22, onBuy:()=>{ state.energyRegenPerSec += 0.15; },
+    valueText:()=>`ур. ${state.upgrades.regen} • ${state.energyRegenPerSec.toFixed(2)}/сек`
   },
-  {
-    key: "efficiency",
-    name: "Efficiency",
-    icon: "🛡️",
-    desc: "-0.1 энергии за тап",
-    baseCost: 600, costMul: 1.22,
-    onBuy: () => { state.energyCostPerTap = Math.max(0.6, state.energyCostPerTap - 0.1); },
-    valueText: () => `ур. ${state.upgrades.efficiency} • cost ${state.energyCostPerTap.toFixed(1)}`,
+  { key:"efficiency", name:"Efficiency", icon:"🛡️", desc:"-0.10 энергии за тап",
+    baseCost:650, costMul:1.22, onBuy:()=>{ state.energyCostPerTap = Math.max(0.6, state.energyCostPerTap - 0.10); },
+    valueText:()=>`ур. ${state.upgrades.efficiency} • cost ${state.energyCostPerTap.toFixed(2)}`
   },
 
-  // multitap mechanics
-  {
-    key: "crit",
-    name: "Lucky Tooth",
-    icon: "🍀",
-    desc: "+1% к крит шансу",
-    baseCost: 800, costMul: 1.25,
-    onBuy: () => { state.critChance = Math.min(0.6, state.critChance + 0.01); },
-    valueText: () => `ур. ${state.upgrades.crit} • ${Math.round(state.critChance*100)}%`,
+  { key:"crit", name:"Lucky Tooth", icon:"🍀", desc:"+1% к крит шансу",
+    baseCost:900, costMul:1.25, onBuy:()=>{ state.critChance = Math.min(0.6, state.critChance + 0.01); },
+    valueText:()=>`ур. ${state.upgrades.crit} • ${Math.round(state.critChance*100)}%`
   },
-  {
-    key: "critmult",
-    name: "Whale Rage",
-    icon: "🐋",
-    desc: "+0.1 к крит множителю",
-    baseCost: 1200, costMul: 1.28,
-    onBuy: () => { state.critMult = Math.min(10, state.critMult + 0.1); },
-    valueText: () => `ур. ${state.upgrades.critmult} • x${state.critMult.toFixed(1)}`,
+  { key:"critmult", name:"Whale Rage", icon:"🐋", desc:"+0.1 к крит множителю",
+    baseCost:1400, costMul:1.28, onBuy:()=>{ state.critMult = Math.min(10, state.critMult + 0.1); },
+    valueText:()=>`ур. ${state.upgrades.critmult} • x${state.critMult.toFixed(1)}`
   },
-  {
-    key: "combo",
-    name: "Combo Training",
-    icon: "🥊",
-    desc: "усиливает комбо",
-    baseCost: 900, costMul: 1.22,
-    onBuy: () => {},
-    valueText: () => `ур. ${state.upgrades.combo} • x${calcComboMult().toFixed(2)}`,
+  { key:"combo", name:"Combo Training", icon:"🥊", desc:"усиливает комбо",
+    baseCost:950, costMul:1.22, onBuy:()=>{},
+    valueText:()=>`ур. ${state.upgrades.combo} • x${calcComboMult().toFixed(2)}`
   },
-  {
-    key: "autoclick",
-    name: "Auto Clicker",
-    icon: "🤖",
-    desc: "+1 авто-тап/сек",
-    baseCost: 5000, costMul: 1.35,
-    onBuy: () => { state.autoTapsPerSec += 1; },
-    valueText: () => `ур. ${state.upgrades.autoclick} • ${state.autoTapsPerSec}/сек`,
+  { key:"autoclick", name:"Auto Clicker", icon:"🤖", desc:"+1 авто-тап/сек",
+    baseCost:5500, costMul:1.35, onBuy:()=>{ state.autoTapsPerSec += 1; },
+    valueText:()=>`ур. ${state.upgrades.autoclick} • ${state.autoTapsPerSec}/сек`
   },
 ];
 
@@ -376,111 +319,74 @@ function upgradeCost(u){
 
 /* -------------------- Quests -------------------- */
 function dailyReward(){
-  // растёт от прогресса: базовая + немного от дохода
   return Math.floor(80 + (state.perSec * 60) * 0.12);
 }
 
 function questDefinitions(){
   return [
     {
-      key: "daily",
-      icon: "🎁",
-      name: "Ежедневная награда",
-      desc: "Забирай 1 раз в день",
-      canClaim: () => state.quests.daily.lastClaimDay !== todayKey(),
-      rewardText: () => `+${format(dailyReward())} MobyCoin`,
-      claim: () => {
-        state.balance += dailyReward();
-        state.quests.daily.lastClaimDay = todayKey();
-      }
+      key:"daily", icon:"🎁", name:"Ежедневная награда", desc:"Забирай 1 раз в день",
+      canClaim:()=> state.quests.daily.lastClaimDay !== todayKey(),
+      rewardText:()=> `+${format(dailyReward())}`,
+      claim:()=>{ addEarnings(dailyReward()); state.quests.daily.lastClaimDay = todayKey(); }
     },
     {
-      key: "taps",
-      icon: "👆",
-      name: "Сделай 300 тапов",
-      desc: `Прогресс: ${state.quests.taps.done}/${state.quests.taps.target}`,
-      canClaim: () => state.quests.taps.done >= state.quests.taps.target && !state.quests.taps.claimed,
-      rewardText: () => `+${format(250)} MobyCoin`,
-      claim: () => { state.balance += 250; state.quests.taps.claimed = true; }
+      key:"taps", icon:"👆", name:"Сделай 300 тапов",
+      desc:`Прогресс: ${state.quests.taps.done}/${state.quests.taps.target}`,
+      canClaim:()=> state.quests.taps.done >= state.quests.taps.target && !state.quests.taps.claimed,
+      rewardText:()=> `+${format(250)}`,
+      claim:()=>{ addEarnings(250); state.quests.taps.claimed = true; }
     },
     {
-      key: "balance",
-      icon: "🏦",
-      name: "Накопи 800 MobyCoin",
-      desc: `Баланс: ${format(state.balance)}/${format(state.quests.balance.target)}`,
-      canClaim: () => state.balance >= state.quests.balance.target && !state.quests.balance.claimed,
-      rewardText: () => `+${format(500)} MobyCoin`,
-      claim: () => { state.balance += 500; state.quests.balance.claimed = true; }
+      key:"balance", icon:"🏦", name:"Накопи 800 баланса",
+      desc:`Баланс: ${format(state.balance)}/${format(state.quests.balance.target)}`,
+      canClaim:()=> state.balance >= state.quests.balance.target && !state.quests.balance.claimed,
+      rewardText:()=> `+${format(500)}`,
+      claim:()=>{ addEarnings(500); state.quests.balance.claimed = true; }
     },
     {
-      key: "buy_grandma",
-      icon: "👵",
-      name: "Купи Grandma",
-      desc: "Купи бабушку хотя бы 1 раз",
-      canClaim: () => state.upgrades.grandma >= 1 && !state.quests.buy_grandma.claimed,
-      rewardText: () => `+${format(250)} MobyCoin`,
-      claim: () => { state.balance += 250; state.quests.buy_grandma.claimed = true; }
+      key:"buy_grandma", icon:"👵", name:"Купи Grandma",
+      desc:"Купи бабушку хотя бы 1 раз",
+      canClaim:()=> state.upgrades.grandma >= 1 && !state.quests.buy_grandma.claimed,
+      rewardText:()=> `+${format(250)}`,
+      claim:()=>{ addEarnings(250); state.quests.buy_grandma.claimed = true; }
     },
     {
-      key: "buy_autoclick",
-      icon: "🤖",
-      name: "Купи Auto Clicker",
-      desc: "Купи автокликер хотя бы 1 раз",
-      canClaim: () => state.upgrades.autoclick >= 1 && !state.quests.buy_autoclick.claimed,
-      rewardText: () => `+${format(900)} MobyCoin`,
-      claim: () => { state.balance += 900; state.quests.buy_autoclick.claimed = true; }
+      key:"buy_autoclick", icon:"🤖", name:"Купи Auto Clicker",
+      desc:"Купи автокликер хотя бы 1 раз",
+      canClaim:()=> state.upgrades.autoclick >= 1 && !state.quests.buy_autoclick.claimed,
+      rewardText:()=> `+${format(900)}`,
+      claim:()=>{ addEarnings(900); state.quests.buy_autoclick.claimed = true; }
     },
     {
-      key: "reach_persec",
-      icon: "📈",
-      name: "Дойди до 50/сек",
-      desc: `Текущий доход: ${format(state.perSec)}/${format(state.quests.reach_persec.target)}`,
-      canClaim: () => state.perSec >= state.quests.reach_persec.target && !state.quests.reach_persec.claimed,
-      rewardText: () => `+${format(3500)} MobyCoin`,
-      claim: () => { state.balance += 3500; state.quests.reach_persec.claimed = true; }
+      key:"reach_persec", icon:"📈", name:"Дойди до 50/сек",
+      desc:`Доход: ${format(state.perSec)}/${format(state.quests.reach_persec.target)}`,
+      canClaim:()=> state.perSec >= state.quests.reach_persec.target && !state.quests.reach_persec.claimed,
+      rewardText:()=> `+${format(3500)}`,
+      claim:()=>{ addEarnings(3500); state.quests.reach_persec.claimed = true; }
     },
     {
-      key: "buy_lab",
-      icon: "🧪",
-      name: "Открой Lab",
-      desc: "Купи лабораторию хотя бы 1 раз",
-      canClaim: () => state.upgrades.lab >= 1 && !state.quests.buy_lab.claimed,
-      rewardText: () => `+${format(15000)} MobyCoin`,
-      claim: () => { state.balance += 15000; state.quests.buy_lab.claimed = true; }
+      key:"buy_lab", icon:"🧪", name:"Открой Lab",
+      desc:"Купи лабораторию хотя бы 1 раз",
+      canClaim:()=> state.upgrades.lab >= 1 && !state.quests.buy_lab.claimed,
+      rewardText:()=> `+${format(15000)}`,
+      claim:()=>{ addEarnings(15000); state.quests.buy_lab.claimed = true; }
     },
     {
-      key: "buy_skin",
-      icon: "🎭",
-      name: "Купи любой скин",
-      desc: "Купи любой платный скин кнопки",
-      canClaim: () => state.skins.owned.some(id => (SKINS.find(s=>s.id===id)?.price||0) > 0) && !state.quests.buy_skin.claimed,
-      rewardText: () => `+${format(2000)} MobyCoin`,
-      claim: () => { state.balance += 2000; state.quests.buy_skin.claimed = true; }
+      key:"buy_skin", icon:"🎭", name:"Купи любой скин",
+      desc:"Купи любой платный скин кнопки",
+      canClaim:()=> state.skins.owned.some(id => (SKINS.find(s=>s.id===id)?.price||0) > 0) && !state.quests.buy_skin.claimed,
+      rewardText:()=> `+${format(2000)}`,
+      claim:()=>{ addEarnings(2000); state.quests.buy_skin.claimed = true; }
     },
-
-    // Заглушки без сервера
-    {
-      key: "subscribe",
-      icon: "📣",
-      name: "Подпишись на канал",
-      desc: "Без сервера — только заглушка",
-      canClaim: () => false,
-      rewardText: () => `+${format(1200)} MobyCoin`,
-      claim: () => {}
-    },
-    {
-      key: "invite",
-      icon: "👥",
-      name: "Пригласи 3 друзей",
-      desc: "Без сервера — только заглушка",
-      canClaim: () => false,
-      rewardText: () => `+${format(2500)} MobyCoin`,
-      claim: () => {}
-    },
+    { key:"subscribe", icon:"📣", name:"Подпишись на канал", desc:"Без сервера — заглушка",
+      canClaim:()=>false, rewardText:()=>"+1200", claim:()=>{} },
+    { key:"invite", icon:"👥", name:"Пригласи 3 друзей", desc:"Без сервера — заглушка",
+      canClaim:()=>false, rewardText:()=>"+2500", claim:()=>{} },
   ];
 }
 
-/* -------------------- Visual coins particles -------------------- */
+/* -------------------- Click particles (coins) -------------------- */
 function spawnCoins(count = 6){
   for(let i=0;i<count;i++){
     const c = document.createElement("div");
@@ -501,12 +407,51 @@ function spawnCoins(count = 6){
   }
 }
 
+/* -------------------- Rain FX for boosts -------------------- */
+let rainTimer = null;
+
+function startRain(kind, durationMs){
+  stopRain();
+
+  const emoji = kind === "coins" ? "🪙" : "🔋";
+  const endAt = now() + durationMs;
+
+  rainTimer = setInterval(() => {
+    if(now() >= endAt){
+      stopRain();
+      return;
+    }
+    // 10–16 шт/сек визуально красиво, но не слишком тяжело
+    const batch = 8 + Math.floor(Math.random()*6);
+    for(let i=0;i<batch;i++){
+      const item = document.createElement("div");
+      item.className = "rain-item";
+      item.textContent = emoji;
+
+      const x = Math.random()*100; // vw
+      const dur = (1.8 + Math.random()*1.8).toFixed(2) + "s";
+
+      item.style.left = `${x}vw`;
+      item.style.setProperty("--dur", dur);
+
+      el.fxLayer.appendChild(item);
+      setTimeout(()=>item.remove(), 4200);
+    }
+  }, 120);
+}
+
+function stopRain(){
+  if(rainTimer){
+    clearInterval(rainTimer);
+    rainTimer = null;
+  }
+}
+
 /* -------------------- Boosts logic -------------------- */
 function cleanupBoosts(){
   const t = now();
   if(state.boosts.active.double && t > state.boosts.active.double) state.boosts.active.double = 0;
   if(state.boosts.active.infinite && t > state.boosts.active.infinite) state.boosts.active.infinite = 0;
-
   if(state.boosts.shown && t > state.boosts.shown.expiresAt) state.boosts.shown = null;
 }
 
@@ -516,16 +461,17 @@ function showRandomBoost(){
   const t = now();
   if(state.boosts.nextSpawnAt && t < state.boosts.nextSpawnAt) return;
 
-  // следующее появление через 22–42 сек
-  state.boosts.nextSpawnAt = t + (22 + Math.random()*20) * 1000;
+  // РЕЖЕ: следующее появление через 40–70 сек
+  state.boosts.nextSpawnAt = t + (40 + Math.random()*30) * 1000;
 
   const pick = BOOSTS[Math.floor(Math.random()*BOOSTS.length)];
-  const lifeMs = 9000;
+  const lifeMs = 11000;
 
-  const corners = ["boost-tl","boost-tr","boost-bl","boost-br"];
-  const corner = corners[Math.floor(Math.random()*corners.length)];
+  // Позиция по всей кнопке (проценты)
+  const x = 10 + Math.random()*80; // %
+  const y = 10 + Math.random()*80; // %
 
-  state.boosts.shown = { type: pick.type, expiresAt: t + lifeMs, corner };
+  state.boosts.shown = { type: pick.type, expiresAt: t + lifeMs, x, y };
   saveState();
 }
 
@@ -546,12 +492,16 @@ function renderBoost(){
   const def = BOOSTS.find(b => b.type === shown.type);
   if(!def) return;
 
-  const btn = document.createElement("div");
-  btn.className = `boost-chip ${shown.corner || "boost-tr"}`;
   const left = Math.max(0, Math.ceil((shown.expiresAt - now())/1000));
 
+  const btn = document.createElement("div");
+  btn.className = "boost-chip";
+  btn.style.left = `${shown.x}%`;
+  btn.style.top  = `${shown.y}%`;
+  btn.style.transform = "translate(-50%,-50%)"; // центрируем по точке
+
   btn.innerHTML = `
-    <span>${def.icon}</span>
+    <span class="bicon">${def.icon}</span>
     <div style="display:flex;flex-direction:column;gap:2px">
       <div>${def.title}</div>
       <small>жми!</small>
@@ -560,8 +510,14 @@ function renderBoost(){
   `;
 
   btn.addEventListener("click", () => {
-    state.boosts.active[def.type] = now() + def.durationSec*1000;
+    const until = now() + def.durationSec*1000;
+    state.boosts.active[def.type] = until;
     state.boosts.shown = null;
+
+    // FX дождь
+    if(def.type === "double") startRain("coins", def.durationSec*1000);
+    if(def.type === "infinite") startRain("batteries", def.durationSec*1000);
+
     haptic("medium");
     saveState();
     renderAll();
@@ -577,7 +533,7 @@ function renderBoostStatus(){
   const d = state.boosts.active.double || 0;
   const i = state.boosts.active.infinite || 0;
 
-  if(d > t) parts.push(`x2: ${Math.ceil((d - t)/1000)}с`);
+  if(d > t) parts.push(`🚀 x2: ${Math.ceil((d - t)/1000)}с`);
   if(i > t) parts.push(`∞: ${Math.ceil((i - t)/1000)}с`);
 
   el.boostStatus.textContent = parts.length ? `Бусты: ${parts.join(" • ")}` : "";
@@ -599,11 +555,15 @@ function renderEnergy(){
   el.energyFill.style.width = `${clamp(pct,0,100)}%`;
 
   const missing = Math.max(0, state.energyMax - state.energy);
+  const regen = state.energyRegenPerSec;
+
   if(missing < 1){
-    el.energyHint.textContent = "Полная энергия";
+    el.energyHint.textContent = `Полная энергия • regen ${regen.toFixed(2)}/сек`;
   }else{
-    const sec = state.energyRegenPerSec > 0 ? Math.ceil(missing / state.energyRegenPerSec) : null;
-    el.energyHint.textContent = sec ? `До полного: ~${sec} сек` : "Восстановление отключено";
+    const sec = regen > 0 ? Math.ceil(missing / regen) : null;
+    el.energyHint.textContent = sec
+      ? `Regen ${regen.toFixed(2)}/сек • До полного: ~${sec} сек`
+      : `Regen 0/сек • До полного: ∞`;
   }
 
   renderBoostStatus();
@@ -614,6 +574,7 @@ function renderStats(){
 
   const perTap = calcPerTap();
 
+  el.score.textContent = format(state.score);
   el.balance.textContent = format(state.balance);
   el.perTap.textContent = format(perTap);
   el.perSec.textContent = format(state.perSec);
@@ -782,7 +743,7 @@ function renderQuests(){
       if(!q.canClaim()) return;
       q.claim();
       haptic("medium");
-      floatText(q.rewardText().replace(" MobyCoin",""), "crit");
+      floatText(`+${q.rewardText()}`, "crit");
       saveState();
       renderAll();
     });
@@ -851,7 +812,7 @@ function doTap(isAuto=false){
   const doubleOn = now() < (state.boosts.active.double || 0);
   if(doubleOn) gain *= 2;
 
-  state.balance += gain;
+  addEarnings(gain);
 
   if(!isAuto){
     haptic(isCrit ? "heavy" : "light");
@@ -859,7 +820,6 @@ function doTap(isAuto=false){
     spawnCoins(isCrit ? 10 : 6);
   }
 
-  // квест: тапать
   state.quests.taps.done += 1;
 
   saveState();
@@ -890,8 +850,8 @@ function initTabs(){
 /* -------------------- Loops -------------------- */
 function startLoops(){
   setInterval(() => {
-    // пассив
-    if(state.perSec > 0) state.balance += state.perSec;
+    // пассив: тоже начисляет очки
+    if(state.perSec > 0) addEarnings(state.perSec);
 
     // реген энергии
     if(state.energyRegenPerSec > 0){
@@ -921,6 +881,7 @@ function wireUI(){
   });
 
   el.resetBtn.addEventListener("click", () => {
+    stopRain();
     localStorage.removeItem(STORAGE_KEY);
     state = defaultState();
     renderAll();
@@ -928,7 +889,7 @@ function wireUI(){
 
   el.shareBtn.addEventListener("click", () => {
     const text =
-      `MobyCoin 🪙\nБаланс: ${format(state.balance)}\nЗа тап: ${format(calcPerTap())}\nВ сек: ${format(state.perSec)}\nЭнергия: ${Math.floor(state.energy)}/${Math.floor(state.energyMax)}`;
+      `MobyCoin 🪙\nОчки: ${format(state.score)}\nБаланс: ${format(state.balance)}\nЗа тап: ${format(calcPerTap())}\nВ сек: ${format(state.perSec)}\nЭнергия: ${Math.floor(state.energy)}/${Math.floor(state.energyMax)}`;
     if(tg?.showPopup){
       tg.showPopup({ title: "Результат", message: text, buttons: [{ type:"close", text:"Ок" }] });
     }else{
